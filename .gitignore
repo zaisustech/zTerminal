@@ -1,0 +1,4 @@
+build/
+.build/
+zTerminal.xcodeproj/
+AppIcon-preview.png

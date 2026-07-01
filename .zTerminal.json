@@ -1,0 +1,17 @@
+{
+  "bookmarks": [
+    { "name": "Build", "command": "swift build", "icon": "hammer.fill", "color": "#4F8CFF" },
+    { "name": "Test", "command": "swift test", "icon": "testtube.2", "color": "#10B981" },
+    { "name": "Bundle app", "command": "./scripts/bundle.sh && open build/zTerminal.app", "icon": "shippingbox.fill", "color": "#8B5CF6" },
+    { "name": "Generate Xcode project", "command": "xcodegen generate", "icon": "wrench.and.screwdriver.fill", "color": "#F5C451" },
+    { "name": "Clean build", "command": "rm -rf .build build && swift build", "icon": "trash.fill", "color": "#FB7185" },
+    { "name": "Test filter", "command": "swift test --filter <pattern>", "icon": "line.3.horizontal.decrease.circle", "color": "#38BDF8" }
+  ],
+  "theme": {
+    "mode": "glass",
+    "accentHex": "#38BDF8",
+    "gradientHexes": ["#38BDF8", "#3B82F6", "#06B6D4", "#0EA5E9", "#22D3EE"],
+    "terminalScheme": "liquidGlass",
+    "terminalBackgroundHex": "#0A0F1A"
+  }
+}

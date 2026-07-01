@@ -1,0 +1,58 @@
+name: zTerminal
+options:
+  bundleIdPrefix: com.zterminal
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    from: 1.13.0
+
+settings:
+  base:
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_REQUIRED: "YES"
+    ENABLE_HARDENED_RUNTIME: "NO"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+  configs:
+    # Release turns on Hardened Runtime; notarize.sh supplies the Developer ID.
+    Release:
+      ENABLE_HARDENED_RUNTIME: "YES"
+
+targets:
+  zTerminal:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/zTerminal
+      - path: Sources/Assets.xcassets
+      - path: Resources/Fonts
+    dependencies:
+      - package: SwiftTerm
+        product: SwiftTerm
+      - target: zTerminalFinder
+        embed: true
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/zTerminal.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: com.zterminal.app
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+
+  zTerminalFinder:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: FinderExt
+    settings:
+      base:
+        INFOPLIST_FILE: FinderExt/Info.plist
+        CODE_SIGN_ENTITLEMENTS: FinderExt/zTerminalFinder.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.zterminal.app.finder
