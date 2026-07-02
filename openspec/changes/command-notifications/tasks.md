@@ -1,24 +1,24 @@
 ## 1. Shell integration marks
 
-- [ ] 1.1 Extend `ShellColor` zsh bootstrap: `preexec`/`precmd` hooks emit command-start and command-end (with `$?`) marks
-- [ ] 1.2 Same for bash (`PROMPT_COMMAND` / `DEBUG` trap); skip for unsupported shells
-- [ ] 1.3 Compose with existing prompt/OSC 7 injection; keep a bad entry non-fatal
+- [x] 1.1 zsh emits OSC 133 command-start/end marks (with `$?`) — shipped via `ShellColor` + the `command-history` change; parsed by `CommandMarker`
+- [x] 1.2 bash equivalent (DEBUG trap / prompt hooks); unsupported shells skip
+- [x] 1.3 Composed with the existing prompt/OSC 7 injection; a bad entry is non-fatal
 
 ## 2. Parse & model
 
-- [ ] 2.1 Recognize the marks in the terminal data path; ignore them in rendered output
-- [ ] 2.2 On start: record command + start; on end: compute duration, read exit code
-- [ ] 2.3 Publish `LastCommandResult { command, duration, exitCode }` on `SessionModel`
+- [x] 2.1 Marks recognized in the OSC 133 handler (`TerminalHostView`); not rendered
+- [x] 2.2 On start: record command + start time; on end: compute duration + exit code (`SessionModel.noteCommandStart/End`, now keeping the running command text)
+- [x] 2.3 `CommandResult { command, duration, exitCode }` published as `SessionModel.lastCommand` (added `command`)
 
 ## 3. Notify & badge
 
-- [ ] 3.1 `AttentionManager`: on finish, notify when tab is unfocused and `duration >= threshold` (success/failure + duration); update Dock badge; clear on return
-- [ ] 3.2 Render a compact ✓/✗ + duration badge for the last command
-- [ ] 3.3 Add threshold + on/off to `DesignTokens` (tolerant-decoded) + a Settings control
+- [x] 3.1 `AttentionManager.commandFinished(for:result:)` — notifies (✓/✗ + command + duration) when the tab is unfocused and `duration >= threshold`; reuses the Dock-badge/notification path
+- [x] 3.2 Compact ✓/✗ + duration badge for the last command (existing `commandStatus` toolbar segment)
+- [x] 3.3 `DesignTokens.notifyOnCommandFinish` + `commandNotifyThreshold` (tolerant-decoded) + Settings → Terminal → Notifications control; wired to `AttentionManager` from `RootView`
 
 ## 4. Verification
 
-- [ ] 4.1 `swift build`
-- [ ] 4.2 Unit-test mark parsing (start/end/exit code) and the notify decision (focus × duration × threshold)
-- [ ] 4.3 Manual: run a long command in a background tab → notification with duration + success/failure; badge shows ✓/✗; focused tab does not notify
-- [ ] 4.4 Run `openspec validate command-notifications --strict`
+- [x] 4.1 `swift build` — green
+- [x] 4.2 `CommandNotificationTests` (6) — the notify decision (focus × duration × threshold × enabled) + result carries the command; `CommandMarker` parse already covered by `CommandMarkerTests`
+- [ ] 4.3 **Manual/GUI QA** — needs the app run (blocked here by the multi-display/Spaces screenshot issue): long command in a background tab → notification with ✓/✗ + duration; focused tab does not notify; threshold + on/off respected
+- [x] 4.4 `openspec validate command-notifications --strict`

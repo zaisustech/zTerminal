@@ -14,6 +14,15 @@ struct DesignTokens: Codable, Equatable {
     // Frameless look: hide the title bar so content runs edge-to-edge (default on).
     var hideTitleBar: Bool = true
 
+    // Show the bottom toolbar (folder path, git, timer, process status). Default on.
+    var showBottomToolbar: Bool = true
+
+    // Per-item bottom-toolbar visibility: raw values of the items the user has
+    // hidden. Empty (default) means every item shows. Storing the *hidden* set
+    // (rather than the visible one) keeps "all visible" as the zero value, so new
+    // items added later default to visible without touching saved settings.
+    var hiddenToolbarItems: [String] = []
+
     // Prevent idle system sleep (off / while a tab is busy / always).
     var keepAwake: KeepAwakeMode = .off
 
@@ -38,6 +47,35 @@ struct DesignTokens: Codable, Equatable {
 
     /// The five gradient colors from the design brief.
     var gradientHexes: [String] = ["#4F8CFF", "#8B5CF6", "#38BDF8", "#EC4899", "#10B981"]
+
+    /// Gradient direction as start/end points in unit space (0…1 on each axis;
+    /// (0,0) = top-left, (1,1) = bottom-right). Default is horizontal
+    /// (leading → trailing), matching the classic look.
+    var gradientStartX: Double = 0.0
+    var gradientStartY: Double = 0.5
+    var gradientEndX: Double = 1.0
+    var gradientEndY: Double = 0.5
+
+    /// Window background style: animated blobs (default) or a linear gradient that
+    /// honors the direction points above.
+    var backgroundStyle: BackgroundStyle = .blobs
+
+    /// How strongly the selected gradient tints the frosted glass panel (0…1). The
+    /// dark glass material otherwise crushes light gradients to gray; raising this
+    /// makes the terminal/chrome visibly take on the chosen colors.
+    var gradientTint: Double = 0.35
+
+    /// External editor for ⌘-click file links + the "Open in editor" button
+    /// (`EditorLauncher.Editor` raw value). Custom uses `editorCommand`.
+    var editor: String = "vscode"
+    /// Custom editor command template (`{file}`/`{line}`/`{col}`), used when
+    /// `editor` == "custom".
+    var editorCommand: String = ""
+
+    /// Notify when a command finishes in an unfocused tab and ran at least
+    /// `commandNotifyThreshold` seconds.
+    var notifyOnCommandFinish: Bool = true
+    var commandNotifyThreshold: Double = 30   // seconds (5 … 300)
 }
 
 /// Tolerant decoding: any missing key falls back to its default, so adding a new
@@ -46,9 +84,13 @@ struct DesignTokens: Codable, Equatable {
 extension DesignTokens {
     private enum CodingKeys: String, CodingKey {
         case accentHex, glassOpacity, blur, cornerRadius, windowTransparency,
-             animationSpeed, hideTitleBar, keepAwake, terminalScheme, shellPath,
+             animationSpeed, hideTitleBar, showBottomToolbar, hiddenToolbarItems,
+             keepAwake, terminalScheme, shellPath,
              terminalFontName, terminalFontSize, terminalBackgroundHex,
-             scriptShortcuts, envVars, gradientHexes
+             scriptShortcuts, envVars, gradientHexes,
+             gradientStartX, gradientStartY, gradientEndX, gradientEndY, backgroundStyle,
+             gradientTint, editor, editorCommand,
+             notifyOnCommandFinish, commandNotifyThreshold
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +104,8 @@ extension DesignTokens {
         windowTransparency = try c.decodeIfPresent(Double.self, forKey: .windowTransparency) ?? d.windowTransparency
         animationSpeed = try c.decodeIfPresent(Double.self, forKey: .animationSpeed) ?? d.animationSpeed
         hideTitleBar = try c.decodeIfPresent(Bool.self, forKey: .hideTitleBar) ?? d.hideTitleBar
+        showBottomToolbar = try c.decodeIfPresent(Bool.self, forKey: .showBottomToolbar) ?? d.showBottomToolbar
+        hiddenToolbarItems = try c.decodeIfPresent([String].self, forKey: .hiddenToolbarItems) ?? d.hiddenToolbarItems
         keepAwake = try c.decodeIfPresent(KeepAwakeMode.self, forKey: .keepAwake) ?? d.keepAwake
         terminalScheme = try c.decodeIfPresent(TerminalScheme.self, forKey: .terminalScheme) ?? d.terminalScheme
         shellPath = try c.decodeIfPresent(String.self, forKey: .shellPath) ?? d.shellPath
@@ -71,6 +115,90 @@ extension DesignTokens {
         scriptShortcuts = try c.decodeIfPresent([ScriptShortcut].self, forKey: .scriptShortcuts) ?? d.scriptShortcuts
         envVars = try c.decodeIfPresent([EnvVar].self, forKey: .envVars) ?? d.envVars
         gradientHexes = try c.decodeIfPresent([String].self, forKey: .gradientHexes) ?? d.gradientHexes
+        gradientStartX = try c.decodeIfPresent(Double.self, forKey: .gradientStartX) ?? d.gradientStartX
+        gradientStartY = try c.decodeIfPresent(Double.self, forKey: .gradientStartY) ?? d.gradientStartY
+        gradientEndX = try c.decodeIfPresent(Double.self, forKey: .gradientEndX) ?? d.gradientEndX
+        gradientEndY = try c.decodeIfPresent(Double.self, forKey: .gradientEndY) ?? d.gradientEndY
+        backgroundStyle = try c.decodeIfPresent(BackgroundStyle.self, forKey: .backgroundStyle) ?? d.backgroundStyle
+        gradientTint = try c.decodeIfPresent(Double.self, forKey: .gradientTint) ?? d.gradientTint
+        editor = try c.decodeIfPresent(String.self, forKey: .editor) ?? d.editor
+        editorCommand = try c.decodeIfPresent(String.self, forKey: .editorCommand) ?? d.editorCommand
+        notifyOnCommandFinish = try c.decodeIfPresent(Bool.self, forKey: .notifyOnCommandFinish) ?? d.notifyOnCommandFinish
+        commandNotifyThreshold = try c.decodeIfPresent(Double.self, forKey: .commandNotifyThreshold) ?? d.commandNotifyThreshold
+    }
+}
+
+/// A configurable segment of the bottom toolbar. Each one can be independently
+/// hidden from Settings or from the toolbar's own right-click menu. `allCases`
+/// order is the on-screen order, so it drives the Settings list too.
+enum ToolbarItemKind: String, Codable, CaseIterable, Identifiable {
+    case directory, git, environment, commandStatus, startTime, duration, sidebar, search, editor, clear, restart, shellStatus
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .directory:     return "Folder path"
+        case .git:           return "Git branch"
+        case .environment:   return "Runtime versions"
+        case .commandStatus: return "Command status"
+        case .startTime:     return "Start time"
+        case .duration:      return "Session duration"
+        case .sidebar:       return "File explorer button"
+        case .search:        return "Search button"
+        case .editor:        return "Open in editor button"
+        case .clear:         return "Clear button"
+        case .restart:       return "Restart button"
+        case .shellStatus:   return "Shell status"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .directory:     return "folder"
+        case .git:           return "arrow.triangle.branch"
+        case .environment:   return "shippingbox"
+        case .commandStatus: return "checkmark.circle"
+        case .startTime:     return "clock"
+        case .duration:      return "stopwatch"
+        case .sidebar:       return "sidebar.left"
+        case .search:        return "magnifyingglass"
+        case .editor:        return "chevron.left.forwardslash.chevron.right"
+        case .clear:         return "trash"
+        case .restart:       return "arrow.clockwise"
+        case .shellStatus:   return "bolt.horizontal.circle"
+        }
+    }
+
+    /// Short note shown under the toggle in Settings.
+    var detail: String {
+        switch self {
+        case .directory:     return "Current folder, click to reveal in Finder."
+        case .git:           return "Branch, dirty state, ahead/behind, and git quick-actions."
+        case .environment:   return "Detected runtime badges (e.g. node, python)."
+        case .commandStatus: return "Running program, or the last command's result."
+        case .startTime:     return "When this session started."
+        case .duration:      return "Live elapsed-time counter."
+        case .sidebar:       return "Button to toggle the file explorer (⌘⌥B)."
+        case .search:        return "Button to search the terminal (⌘F)."
+        case .editor:        return "Button to open the current folder in your editor."
+        case .clear:         return "Button to clear the terminal (⌘K)."
+        case .restart:       return "Button to restart a finished session."
+        case .shellStatus:   return "Live/completed shell indicator."
+        }
+    }
+}
+
+extension DesignTokens {
+    /// Whether a given toolbar item should be shown (not in the hidden set).
+    func showsToolbarItem(_ kind: ToolbarItemKind) -> Bool {
+        !hiddenToolbarItems.contains(kind.rawValue)
+    }
+
+    /// Show or hide a single toolbar item, keeping `hiddenToolbarItems` minimal.
+    mutating func setToolbarItem(_ kind: ToolbarItemKind, visible: Bool) {
+        hiddenToolbarItems.removeAll { $0 == kind.rawValue }
+        if !visible { hiddenToolbarItems.append(kind.rawValue) }
     }
 }
 
@@ -156,6 +284,14 @@ enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
     var isGlass: Bool { self == .glass }
 }
 
+/// How the window background renders the gradient colors.
+enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {
+    case blobs    // drifting, blurred colored blobs (default animated look)
+    case linear   // a linear gradient honoring the direction points
+    var id: String { rawValue }
+    var label: String { self == .blobs ? "Animated" : "Linear" }
+}
+
 /// Single source of truth for appearance + tokens; changes apply live and persist.
 final class ThemeManager: ObservableObject {
     // Base (user) theme — persisted; Settings edits these directly.
@@ -223,6 +359,14 @@ final class ThemeManager: ObservableObject {
 
     var accent: Color { Color(hex: effectiveTokens.accentHex) }
     var gradientColors: [Color] { effectiveTokens.gradientHexes.map(Color.init(hex:)) }
+
+    /// Gradient direction as SwiftUI unit points (from the direction tokens).
+    var gradientStartPoint: UnitPoint {
+        UnitPoint(x: effectiveTokens.gradientStartX, y: effectiveTokens.gradientStartY)
+    }
+    var gradientEndPoint: UnitPoint {
+        UnitPoint(x: effectiveTokens.gradientEndX, y: effectiveTokens.gradientEndY)
+    }
 
     /// SwiftUI materials can't take a blur radius, so map the Blur-Intensity token
     /// (6…44) to the five material tiers — the slider now visibly changes frost.

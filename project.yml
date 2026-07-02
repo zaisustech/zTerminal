@@ -7,8 +7,8 @@ options:
 
 packages:
   SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm.git
-    from: 1.13.0
+    # Vendored fork (see ThirdParty/SwiftTerm/MODIFICATIONS.md).
+    path: ThirdParty/SwiftTerm
 
 settings:
   base:
@@ -33,6 +33,11 @@ targets:
       - path: Sources/zTerminal
       - path: Sources/Assets.xcassets
       - path: Resources/Fonts
+      # Markdown preview renderer bundle (built by scripts/build-preview-assets.sh,
+      # committed). Folder reference so fonts/ subpaths survive into the app.
+      - path: Resources/Preview
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: SwiftTerm
         product: SwiftTerm

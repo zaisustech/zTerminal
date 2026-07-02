@@ -69,8 +69,10 @@ enum ShellColor {
         add-zsh-hook chpwd _zt_osc7 2>/dev/null
         _zt_osc7
 
-        # Command lifecycle markers (OSC 133) — power the exit code + duration badge.
-        _zt_c() { printf '\\033]133;C\\033\\\\' }
+        # Command lifecycle markers (OSC 133) — power the exit code + duration
+        # badge and app-side command history. preexec receives the command as
+        # $1; it travels base64-encoded so quotes/newlines survive transport.
+        _zt_c() { printf '\\033]133;C;%s\\033\\\\' "$(printf %s "$1" | command base64 | command tr -d '\\n')" }
         _zt_d() { printf '\\033]133;D;%s\\033\\\\' "$?" }
         add-zsh-hook preexec _zt_c 2>/dev/null
         add-zsh-hook precmd _zt_d 2>/dev/null
@@ -82,7 +84,14 @@ enum ShellColor {
           PROMPT='%F{42}❯%f %F{45}%1~%f$(_zt_git) %f'
         fi
 
+        # Prompt-end marker (OSC 133;B) — tells zTerminal the column where input
+        # begins, powering inline ghost autosuggestion. Zero-width via %{…%}. A
+        # prompt framework that rebuilds PROMPT each render simply drops this
+        # (autosuggest then stays off), never breaking the prompt.
+        PROMPT="${PROMPT}%{$(printf '\\033]133;B\\033\\\\')%}"
+
         """
+        s += markdownPreviewBlock
         // Env vars + shortcuts last, so they win over any same-named export/alias
         // from the rc sourced above.
         s += EnvVar.shellBlock(for: envVars)
@@ -90,27 +99,58 @@ enum ShellColor {
         return s
     }
 
+    /// `markdown <file>` opens the Markdown preview split beside this terminal;
+    /// `md <file>` opens it as a tab. Signalled in-band via OSC 7773 so it works
+    /// in the exact tab you typed it in (no LaunchServices round-trip). POSIX
+    /// syntax — the same block is valid in zsh and bash.
+    static let markdownPreviewBlock = ##"""
+
+    # zTerminal Markdown preview: `markdown <file>` = split pane, `md <file>` = tab.
+    _zt_preview() {
+      _zt_mode="$1"; shift
+      _zt_f="$1"
+      if [ -z "$_zt_f" ]; then echo "usage: markdown <file.md>  (split) | md <file.md>  (tab)" >&2; return 1; fi
+      case "$_zt_f" in /*) ;; ~*) _zt_f="$HOME${_zt_f#\~}";; *) _zt_f="$PWD/$_zt_f";; esac
+      if [ ! -f "$_zt_f" ]; then echo "markdown: no such file: $_zt_f" >&2; return 1; fi
+      printf '\033]7773;preview;%s;%s\033\\' "$_zt_mode" "$_zt_f"
+    }
+    markdown() { _zt_preview split "$@"; }
+    md() { _zt_preview tab "$@"; }
+
+    """##
+
     // MARK: - bash
 
     // Raw string (no Swift escaping) — backslashes are literal for the shell.
     // OSC 7 tracks the CWD; OSC 133 C/D (DEBUG trap + PROMPT_COMMAND, capturing
     // $? first) power the exit code + duration badge. The `__zt_armed` flag emits
     // exactly one C per command line, ignoring our own internal commands.
+    // The command text rides the C marker ($BASH_COMMAND, base64) for app-side
+    // history. Note: bash strips leading spaces from $BASH_COMMAND, so the
+    // leading-space history opt-out is zsh-only; bash users rely on HISTCONTROL
+    // semantics for their shell history but not for the app store.
     private static let bashIntegration = ##"""
     __zt_armed=0
     __zt_preexec() {
-      case "$BASH_COMMAND" in __zt_*) return;; esac
+      case "$BASH_COMMAND" in __zt_*|_zt_*) return;; esac
       [ "$__zt_armed" = 1 ] || return
       __zt_armed=0
-      printf '\033]133;C\033\\'
+      printf '\033]133;C;%s\033\\' "$(printf %s "$BASH_COMMAND" | command base64 | command tr -d '\n')"
     }
     trap '__zt_preexec' DEBUG
     PROMPT_COMMAND='__zt_ec=$?; printf "\033]7;file://%s%s\033\\" "$HOSTNAME" "$PWD"; printf "\033]133;D;%s\033\\" "$__zt_ec"; __zt_armed=1'
     """##
 
+    // Prompt-end marker (OSC 133;B) appended to PS1 — tells zTerminal where input
+    // begins for inline ghost autosuggestion. Zero-width via \[…\]. Dropped
+    // harmlessly by prompts that rebuild PS1 each render.
+    private static let bashPromptEndMarker = #"PS1="${PS1}\[$(printf '\033]133;B\033\\')\]""#
+
     private static func bashrc(shortcuts: [ScriptShortcut], envVars: [EnvVar] = []) -> String {
         var s = "[ -f \"$HOME/.bashrc\" ] && source \"$HOME/.bashrc\"\n"
         s += bashIntegration + "\n"
+        s += bashPromptEndMarker + "\n"
+        s += markdownPreviewBlock
         // Env vars + shortcuts last, so they win over any same-named export/alias
         // from the rc sourced above.
         s += EnvVar.shellBlock(for: envVars)

@@ -22,7 +22,7 @@ enum KeepAwakeMode: String, Codable, CaseIterable, Identifiable {
 final class KeepAwakeManager {
     static let shared = KeepAwakeManager()
 
-    var mode: KeepAwakeMode = .off { didSet { evaluate() } }
+    var mode: KeepAwakeMode = .off { didSet { evaluate(); syncTimer() } }
     var busyProvider: () -> Bool = { false }
 
     private var token: NSObjectProtocol?
@@ -33,13 +33,24 @@ final class KeepAwakeManager {
         mode == .always || (mode == .whileBusy && busy)
     }
 
-    /// Called once at launch; starts the 1 Hz re-evaluation ticker.
+    /// Called once at launch. The 1 Hz re-evaluation ticker only runs in
+    /// `.whileBusy` — the other modes need no polling (perf: this used to poll
+    /// every tab's tty every second even when keep-awake was Off).
     func start() {
-        guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
         evaluate()
+        syncTimer()
+    }
+
+    private func syncTimer() {
+        if mode == .whileBusy {
+            guard timer == nil else { return }
+            let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
+            RunLoop.main.add(t, forMode: .common)
+            timer = t
+        } else {
+            timer?.invalidate()
+            timer = nil
+        }
     }
 
     func evaluate() {

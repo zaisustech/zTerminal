@@ -3,9 +3,35 @@
 A native macOS terminal built with SwiftUI + AppKit, embedding
 [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) as the emulator.
 
+> 📖 **Using the app?** See the [**User Guide**](USER_GUIDE.md) for how to use
+> every feature (shortcuts, inline autosuggestions, project tasks, themes, and
+> more). This README covers building and packaging.
+
+## Features
+
+- **Native & fast** — real VT100/xterm emulator running your login shell (zsh/bash),
+  truecolor, your fonts and dotfiles (never modified).
+- **Project-aware status bar** — current folder, git branch/status, runtime badges,
+  last-command exit + duration, and a session timer; every item toggleable.
+- **Inline autosuggestions** — dim ghost-text completion of `package.json` scripts for
+  your project's detected package manager (bun/npm/pnpm/yarn); `Tab` to accept.
+- **One-click project tasks** — auto-detected scripts for Node/Bun/Cargo/Go/Python/
+  Maven/Gradle/.NET/Deno/Ruby/Make, plus per-project bookmarks in `.zTerminal.json`.
+- **Script shortcuts & env vars** — global name→command aliases and per-tab environment
+  variables, configured in Settings.
+- **Themes** — Liquid Glass and translucent Blur modes, custom gradients, and a
+  global→project theme cascade via `.zTerminal.json`.
+- **Deep macOS integration** — Finder "Open in zTerminal", `zterminal://` URL scheme,
+  Quick Look, notifications + Dock badge, and Keep Awake.
+
+See the [**User Guide**](USER_GUIDE.md) for the full walkthrough and keyboard shortcuts.
+
 - Top tab bar; **⌘T opens a new tab inheriting the current directory**.
 - Bottom toolbar: current folder path, **Reveal in Finder** (local dirs only),
-  session start time, and a live duration timer.
+  git branch/status, runtime badges, command status, session start time, and a
+  live duration timer. **Every item is individually configurable** — toggle each
+  one from **Settings → Appearance → Toolbar Items**, or right-click the toolbar
+  to show/hide items in place.
 - Truecolor (`COLORTERM=truecolor`), Option-as-Meta, and a `zterminal://` URL
   scheme for "open at path".
 

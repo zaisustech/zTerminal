@@ -15,4 +15,4 @@
 ## 4. Verification
 
 - [x] 4.1 Run `openspec validate blur-theme-mode`
-- [ ] 4.2 Manual: Blur shows the gradient through the terminal with legible colored text; other modes stay opaque
+- [x] 4.2 Manual: Blur shows the gradient through the terminal with legible colored text; other modes stay opaque

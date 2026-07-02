@@ -41,6 +41,16 @@ public enum PackageManager: String, Equatable {
         case .bun: return "bun install"
         }
     }
+
+    /// Whether `<manager> <script>` runs a package.json script without an explicit
+    /// `run` word. bun/pnpm/yarn do; npm requires `npm run <script>`. Used by
+    /// inline script completion to know which positions are a script slot.
+    public var runsScriptsBare: Bool {
+        switch self {
+        case .npm:               return false
+        case .pnpm, .yarn, .bun: return true
+        }
+    }
 }
 
 /// Result of scanning a directory's `package.json`.

@@ -10,8 +10,10 @@ let package = Package(
         .executable(name: "zTerminal", targets: ["zTerminal"])
     ],
     dependencies: [
-        // Pinned per design decision (SwiftTerm API drift risk).
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMajor(from: "1.13.0"))
+        // Vendored fork of SwiftTerm 1.13.0 (path dependency) so our public-API
+        // additions for terminal-search survive `swift package resolve`.
+        // See ThirdParty/SwiftTerm/MODIFICATIONS.md.
+        .package(path: "ThirdParty/SwiftTerm")
     ],
     targets: [
         .executableTarget(

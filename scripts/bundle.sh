@@ -18,6 +18,7 @@ cp "$BIN" "$BIN_DIR/zTerminal"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 [ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$RES_DIR/AppIcon.icns"
 [ -d "$ROOT/Resources/Fonts" ] && cp "$ROOT/Resources/Fonts/"*.ttf "$RES_DIR/" 2>/dev/null || true
+[ -d "$ROOT/Resources/Preview" ] && cp -R "$ROOT/Resources/Preview" "$RES_DIR/Preview"
 
 # Register the bundle with Launch Services so the zterminal:// scheme resolves.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" || true

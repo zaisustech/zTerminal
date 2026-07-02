@@ -2,6 +2,9 @@ import SwiftUI
 
 extension Notification.Name {
     static let showWelcome = Notification.Name("zterminal.showWelcome")
+    static let toggleSidebar = Notification.Name("zterminal.toggleSidebar")
+    static let codeFind = Notification.Name("zterminal.codeFind")
+    static let toggleCommandPalette = Notification.Name("zterminal.toggleCommandPalette")
 }
 
 /// First-run welcome: highlights the signature features + key shortcuts.

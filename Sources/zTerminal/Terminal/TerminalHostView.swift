@@ -14,6 +14,13 @@ struct TerminalHostView: NSViewRepresentable {
     private let inset: CGFloat = 8
 
     func makeNSView(context: Context) -> NSView {
+        // Idempotent mount: if this session already has a live terminal (SwiftUI
+        // recreated the representable, or the window tree mounted twice), REUSE
+        // it — never spawn a second shell for the same session.
+        if let existing = session.terminalView, existing.process?.shellPid ?? 0 > 0 {
+            context.coordinator.term = existing
+            return Self.wrapInContainer(existing, inset: inset, theme: theme)
+        }
         let term = ZTerminalView(frame: .init(x: 0, y: 0, width: 800, height: 480))
         term.processDelegate = context.coordinator
         term.onReveal = { [weak session] in session?.revealInFinder() }
@@ -22,18 +29,56 @@ struct TerminalHostView: NSViewRepresentable {
         term.onOpenFolders = { urls in
             if let dir = urls.first?.path { WindowRouter.shared.openInNewTab(dir) }
         }
+        term.onOpenMarkdown = { urls in
+            // One file follows the Settings open-mode; several files each get
+            // their own preview tab (terminal-tab style).
+            WindowRouter.shared.openMarkdownPreviews(urls)
+        }
         term.registerDrag()
         term.installSelectionMonitor()
         session.terminalView = term
         context.coordinator.term = term
+        session.search.attach(to: term)
 
-        // Command lifecycle markers (OSC 133) → last-command exit + duration.
-        // Payload is everything after "133;": "C" (command start) or "D[;<exit>]".
-        term.getTerminal().registerOscHandler(code: 133) { [weak session] slice in
-            guard let session else { return }
+        // ⌘-click a file path → open it in the configured editor at the parsed line.
+        term.onCommandClickToken = { [weak theme] token, cwd in
+            guard let theme,
+                  let target = EditorLauncher.resolve(token: token, cwd: cwd) else { return }
+            let editor = EditorLauncher.Editor(rawValue: theme.tokens.editor) ?? .system
+            EditorLauncher.open(target, editor: editor, customTemplate: theme.tokens.editorCommand)
+        }
+
+        // Inline ghost autosuggestion: complete package.json scripts for the
+        // project's detected package manager (npm/pnpm/yarn/bun), at an idle
+        // prompt, accepted with Tab. Pluggable — more sources can be appended.
+        // Ghost sources in priority order: project script completion first
+        // (context-specific, fast-rejects unless the line starts with a package
+        // manager), then global command history (fish-style prefix match).
+        term.suggestionEngine = SuggestionEngine(sources: [ScriptCompletionSource(),
+                                                           CommandHistorySource()])
+        term.isIdleAtPrompt = { [weak session] in session?.isIdleAtPrompt ?? true }
+        term.notifyUpdateChanges = true   // enable rangeChanged callbacks for reposition
+        term.installKeyMonitor()
+
+        // Command lifecycle markers (OSC 133) → last-command exit + duration, plus
+        // the prompt-end (B) marker that anchors the autosuggestion input column.
+        // Payload is everything after "133;": "C" (start), "D[;<exit>]" (end), "B".
+        // Markdown preview requests from the `markdown`/`md` shell functions
+        // (OSC 7773, defined in ShellColor.markdownPreviewBlock).
+        term.getTerminal().registerOscHandler(code: 7773) { slice in
+            let payload = String(decoding: slice, as: UTF8.self)
+            guard let request = PreviewLogic.previewRequest(fromOSC: payload) else { return }
+            WindowRouter.shared.openMarkdownPreview(URL(fileURLWithPath: request.path),
+                                                    split: request.split)
+        }
+
+        term.getTerminal().registerOscHandler(code: 133) { [weak session, weak term] slice in
             switch CommandMarker.parse(osc133: String(decoding: slice, as: UTF8.self)) {
-            case .start:            session.noteCommandStart()
-            case .end(let code):    session.noteCommandEnd(exitCode: code)
+            case .start(let cmd):   session?.noteCommandStart(command: cmd)
+            case .end(let code):    session?.noteCommandEnd(exitCode: code)
+            case .promptEnd:
+                term?.notePromptEnd()
+                session?.flushInitialCommand()   // shell is at a real prompt now
             case nil:               break
             }
         }
@@ -49,17 +94,7 @@ struct TerminalHostView: NSViewRepresentable {
 
         // Container gives the terminal an inner margin. In Blur mode it's clear so
         // the gradient shows through; otherwise it's the opaque terminal color.
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = (theme.terminalBackgroundIsTranslucent ? NSColor.clear : theme.terminalBackground).cgColor
-        term.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(term)
-        NSLayoutConstraint.activate([
-            term.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
-            term.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -inset),
-            term.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
-            term.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -inset),
-        ])
+        let container = Self.wrapInContainer(term, inset: inset, theme: theme)
 
         // Spawn the login shell chosen in Settings (default zsh), in the session's dir.
         var shell = theme.tokens.shellPath
@@ -101,23 +136,76 @@ struct TerminalHostView: NSViewRepresentable {
         }
         let envArray = env.map { "\($0.key)=\($0.value)" }
 
-        // LocalProcessTerminalView has no cwd parameter; the fork inherits our
-        // process cwd, so set it just around startProcess.
+        // Spawn directly in the tab's directory: the CHILD chdirs after fork
+        // (SwiftTerm `currentDirectory`), so concurrent tab spawns can't race
+        // on the app-global cwd and an unexpanded/missing path falls back to
+        // the inherited cwd explicitly.
         let fm = FileManager.default
-        let saved = fm.currentDirectoryPath
+        let spawnDir = (session.initialDirectory as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
-        if fm.fileExists(atPath: session.initialDirectory, isDirectory: &isDir), isDir.boolValue {
-            fm.changeCurrentDirectoryPath(session.initialDirectory)
-        }
-        term.startProcess(executable: shell, args: shellArgs, environment: envArray)
-        fm.changeCurrentDirectoryPath(saved)
+        let validDir = fm.fileExists(atPath: spawnDir, isDirectory: &isDir) && isDir.boolValue
+            ? spawnDir : nil
+        term.startProcess(executable: shell, args: shellArgs, environment: envArray,
+                          currentDirectory: validDir)
 
-        // Script runner / Finder "open at path + run": inject an initial command.
-        // The PTY buffers input until the shell reads it, so sending now is safe.
-        if let cmd = session.initialCommand, !cmd.isEmpty {
-            term.send(txt: cmd + "\n")
+        // Script runner / bookmarks / Finder "open at path + run": the initial
+        // command is deferred to the first shell prompt (OSC 133;B) instead of
+        // being written into the PTY at spawn — early input can be silently
+        // flushed by rc files (stty/instant-prompt) before the shell ever reads
+        // it, which left bookmark `cd`s unexecuted. A timer covers shells
+        // without our OSC integration.
+        if session.initialCommand?.isEmpty == false {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak session] in
+                session?.flushInitialCommand()
+            }
         }
 
+        // QA / demo hook: with `ZT_QA_SEARCH=<term>` set, seed deterministic sample
+        // output straight into the emulator and open the find bar on that term. Lets
+        // CLI screenshot tooling verify the search overlay without Accessibility
+        // (keystroke injection) permission. No-op unless the env var is set.
+        if let q = ProcessInfo.processInfo.environment["ZT_QA_SEARCH"], !q.isEmpty {
+            term.feed(text: "\r\n\u{1b}[1mzTerminal search QA sample\u{1b}[0m\r\n")
+            for i in 1...40 {
+                term.feed(text: "line \(i): connecting to database — query executed, closing database\r\n")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                session.search.open()
+                session.search.setQuery(q)
+            }
+            // Diagnosis line for CLI runs: state of the whole pipeline after the
+            // debounce has fired (read from stderr by QA tooling).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak term] in
+                guard let term else { return }
+                let t = term.getTerminal()
+                let firstNonEmpty = (0 ..< t.bufferLineCount)
+                    .compactMap { t.bufferLine(atIndex: $0)?.translateToString(trimRight: true) }
+                    .first { !$0.isEmpty } ?? "<all empty>"
+                NSLog("ZT_QA_SEARCH diagnosis: active=%d total=%d bufferLines=%d alt=%d firstLine=%@",
+                      session.search.isActive ? 1 : 0, session.search.total,
+                      t.bufferLineCount, t.isCurrentBufferAlternate ? 1 : 0, firstNonEmpty)
+            }
+        }
+
+        return container
+    }
+
+    /// Inset container around the terminal view. Also used by the idempotent
+    /// remount path, so it detaches the terminal from any previous container.
+    static func wrapInContainer(_ term: ZTerminalView, inset: CGFloat,
+                                theme: ThemeManager) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = (theme.terminalBackgroundIsTranslucent ? NSColor.clear : theme.terminalBackground).cgColor
+        term.removeFromSuperview()
+        term.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(term)
+        NSLayoutConstraint.activate([
+            term.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
+            term.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -inset),
+            term.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
+            term.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -inset),
+        ])
         return container
     }
 

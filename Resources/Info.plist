@@ -18,6 +18,8 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 ZAISUS TECHNOLOGIES (OPC) PRIVATE LIMITED. All rights reserved.</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -35,6 +37,48 @@
             <array>
                 <string>zterminal</string>
             </array>
+        </dict>
+    </array>
+
+    <!-- Markdown files open in the preview (Finder double-click / "Open With").
+         Handled by AppDelegate.application(_:open:). -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Markdown Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.daringfireball.markdown</string>
+                <string>public.markdown</string>
+            </array>
+        </dict>
+    </array>
+    <!-- Declare the markdown UTI (macOS doesn't ship one) so the document
+         type above matches .md/.markdown files everywhere. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.daringfireball.markdown</string>
+            <key>UTTypeDescription</key>
+            <string>Markdown Document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>md</string>
+                    <string>markdown</string>
+                </array>
+            </dict>
         </dict>
     </array>
 

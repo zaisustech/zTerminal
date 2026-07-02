@@ -2,3 +2,4 @@ build/
 .build/
 zTerminal.xcodeproj/
 AppIcon-preview.png
+scripts/preview-src/node_modules/

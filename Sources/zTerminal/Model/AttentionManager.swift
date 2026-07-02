@@ -10,6 +10,17 @@ final class AttentionManager {
     private var pending = Set<UUID>()        // sessions awaiting attention
     private var authorized = false
 
+    /// Command-finish notification settings, driven from Settings (via RootView).
+    var commandNotifyEnabled = true
+    var commandNotifyThreshold: TimeInterval = 30   // seconds
+
+    /// Pure decision: notify on a finished command only when enabled, the tab is
+    /// unfocused, and it ran at least `threshold` seconds. Unit-tested.
+    static func shouldNotifyOnFinish(enabled: Bool, focused: Bool,
+                                     duration: TimeInterval, threshold: TimeInterval) -> Bool {
+        enabled && !focused && duration >= threshold
+    }
+
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             self.authorized = granted
@@ -24,6 +35,21 @@ final class AttentionManager {
             self.updateBadge()
             self.notify(session)
         }
+    }
+
+    /// Called when a command finishes: notify (with ✓/✗ + duration) if the tab is
+    /// unfocused and the command ran at least the threshold.
+    func commandFinished(for session: SessionModel, result: CommandResult) {
+        guard Self.shouldNotifyOnFinish(enabled: commandNotifyEnabled,
+                                        focused: isFocused(session),
+                                        duration: result.duration,
+                                        threshold: commandNotifyThreshold) else { return }
+        let mark = result.succeeded ? "✓" : "✗ (\(result.exitCode))"
+        let cmd = result.command.map { "“\($0)” " } ?? ""
+        let secs = String(format: "%.0fs", result.duration)
+        notify(title: session.displayTitle,
+               body: "\(cmd)\(mark) · \(secs)",
+               id: "cmd-\(session.id.uuidString)")
     }
 
     /// Called when a session becomes the active/focused tab — clears its flag.
@@ -43,11 +69,16 @@ final class AttentionManager {
     }
 
     private func notify(_ session: SessionModel) {
+        notify(title: "zTerminal", body: "\(session.displayTitle) needs your attention",
+               id: session.id.uuidString)
+    }
+
+    private func notify(title: String, body: String, id: String) {
         let content = UNMutableNotificationContent()
-        content.title = "zTerminal"
-        content.body = "\(session.displayTitle) needs your attention"
+        content.title = title
+        content.body = body
         content.sound = .default
-        let req = UNNotificationRequest(identifier: session.id.uuidString, content: content, trigger: nil)
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }
 }

@@ -9,7 +9,11 @@ struct zTerminalApp: App {
     @StateObject private var theme = ThemeManager()
 
     var body: some Scene {
-        WindowGroup {
+        // A single `Window` scene, deliberately not `WindowGroup`: the app shares
+        // one WindowModel, and WindowGroup mints an extra window per URL open
+        // (zterminal:// / Finder), double-mounting every session — which spawned
+        // duplicate shells and re-attached search to an invisible terminal.
+        Window("zTerminal", id: "main") {
             RootView(model: model)
                 .environmentObject(theme)
                 .onAppear { appDelegate.attach(model) }
@@ -17,6 +21,10 @@ struct zTerminalApp: App {
                     // zterminal://open?path=... — validated before use.
                     if let dir = CwdLogic.openPath(fromURL: url) {
                         model.open(directory: dir)
+                    }
+                    // zterminal://preview?path=... — Markdown preview tab.
+                    if let file = PreviewLogic.previewPath(fromURL: url) {
+                        model.openPreview(url: URL(fileURLWithPath: file), split: false)
                     }
                 }
         }
@@ -26,8 +34,28 @@ struct zTerminalApp: App {
                     .keyboardShortcut("t", modifiers: .command)
                 Button("Close Tab") { if let id = model.activeID { model.close(id) } }
                     .keyboardShortcut("w", modifiers: .command)
+                Button("Command Palette…") {
+                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                // Clear moved to ⌘⌥K so the palette can own ⌘K (per the spec).
                 Button("Clear") { model.active?.clear() }
-                    .keyboardShortcut("k", modifiers: .command)
+                    .keyboardShortcut("k", modifiers: [.command, .option])
+                Button("Toggle File Explorer") {
+                    NotificationCenter.default.post(name: .toggleSidebar, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .option])
+                Divider()
+                Button("Open Markdown Preview…") { openMarkdownPreview() }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                Button("Print…") {
+                    guard let active = model.active else { return }
+                    if let panel = active.preview, active.kind == .preview || panel.isFocused,
+                       let doc = panel.activeDoc {
+                        PreviewExport.printDocument(model: doc)
+                    }
+                }
+                .keyboardShortcut("p", modifiers: .command)
                 Divider()
                 Button("Zoom In") { theme.zoomFont(by: 1) }
                     .keyboardShortcut("=", modifiers: .command)
@@ -42,25 +70,58 @@ struct zTerminalApp: App {
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 Divider()
-                // Cmd+1..9 switch tabs.
+                // ⌘1..9 and ⌃1..9 both switch to tab N.
                 ForEach(1...9, id: \.self) { n in
                     Button("Select Tab \(n)") { model.selectIndex(n - 1) }
                         .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                    Button("Select Tab \(n) (⌃)") { model.selectIndex(n - 1) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .control)
                 }
+            }
+            // Edit ▸ Search (⌘F) — routes by focus: preview tabs and focused preview
+            // panes get the in-page document search, the terminal gets the find bar.
+            CommandGroup(after: .textEditing) {
+                Button("Search") {
+                    guard let active = model.active else { return }
+                    if active.kind == .code || active.code != nil {
+                        NotificationCenter.default.post(name: .codeFind, object: nil)
+                    }
+                    else if active.kind == .preview { active.preview?.find() }
+                    else if let pane = active.preview, pane.isFocused { pane.find() }
+                    else { active.search.open() }
+                }
+                .keyboardShortcut("f", modifiers: .command)
             }
             CommandGroup(replacing: .help) {
                 Button("Welcome to zTerminal") {
                     NotificationCenter.default.post(name: .showWelcome, object: nil)
                 }
+                Button("Markdown Preview Streaming Demo") {
+                    PreviewStreamDemo.run(in: model)
+                }
+            }
+            // Replace the default (fixed) Settings scene with our resizable window.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    SettingsWindowController.shared.theme = theme
+                    SettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
         }
+    }
 
-        // ⌘, Settings — the full Liquid Glass theme customizer.
-        Settings {
-            SettingsView().environmentObject(theme)
+    /// File → Open Markdown Preview…: pick a .md file, open it split beside the
+    /// active terminal (falls back to a dedicated tab when there is none).
+    private func openMarkdownPreview() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText,
+                                     .init(filenameExtension: "markdown") ?? .plainText]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a Markdown file to preview"
+        if panel.runModal() == .OK, let url = panel.url {
+            model.openPreview(url: url)
         }
-        .windowResizability(.contentMinSize)   // user-resizable down to the content's min
-        .defaultSize(width: 620, height: 620)
     }
 }
 
@@ -70,7 +131,28 @@ struct zTerminalApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) weak var model: WindowModel?
 
-    func attach(_ model: WindowModel) { self.model = model }
+    /// Files opened before the SwiftUI window attached the model (app launched
+    /// by double-clicking a document) — flushed in `attach`.
+    private var pendingPreviewFiles: [URL] = []
+
+    func attach(_ model: WindowModel) {
+        self.model = model
+        pendingPreviewFiles.forEach { model.openPreview(url: $0, split: false) }
+        pendingPreviewFiles.removeAll()
+    }
+
+    /// Finder double-click / "Open With" on a Markdown document (declared in
+    /// Info.plist CFBundleDocumentTypes) — open it in a preview tab.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.isFileURL {
+            guard PreviewLogic.validateMarkdownPath(url.path) != nil else { continue }
+            if let model {
+                model.openPreview(url: url, split: false)
+            } else {
+                pendingPreviewFiles.append(url)
+            }
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.registerBundledFonts()            // make the bundled Nerd Font available

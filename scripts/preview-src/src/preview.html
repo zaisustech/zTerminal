@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<!-- No network, ever: scripts/styles/fonts only from the bundle directory,
+     images additionally from data: and the zt-asset:// document scheme. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  font-src 'self';
+  img-src 'self' data: zt-asset:;
+  connect-src 'none';
+">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Markdown Preview</title>
+<link rel="stylesheet" href="preview.css">
+</head>
+<body>
+<button id="toc-toggle" title="Toggle table of contents" aria-label="Toggle table of contents"></button>
+<div id="search" role="search">
+  <input class="search-input" type="text" placeholder="Find in document" aria-label="Find in document">
+  <span class="search-count" aria-live="polite"></span>
+  <button class="search-prev" title="Previous match (⇧⏎)" aria-label="Previous match"></button>
+  <button class="search-next" title="Next match (⏎)" aria-label="Next match"></button>
+  <button class="search-close" title="Close (Esc)" aria-label="Close search"></button>
+</div>
+<div id="layout">
+  <nav id="toc" class="toc-empty" aria-label="Table of contents"><div class="toc-list"></div></nav>
+  <main id="wrap"><article id="content"></article></main>
+</div>
+<script src="preview.js"></script>
+</body>
+</html>

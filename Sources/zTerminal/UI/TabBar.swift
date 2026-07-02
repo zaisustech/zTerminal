@@ -35,6 +35,9 @@ struct TabBar: View {
         .padding(.trailing, 10)
         .padding(.vertical, 6)
         .frame(height: 38)
+        // Drag the window from empty tab-bar chrome (tabs/buttons on top keep their
+        // own gestures). Restores window-move after background-drag was disabled.
+        .background(WindowDragHandle())
     }
 }
 
@@ -51,7 +54,8 @@ private struct TabChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: session.isRunning ? "terminal" : "checkmark.circle")
+            Image(systemName: session.kind == .preview ? "doc.richtext"
+                              : session.isRunning ? "terminal" : "checkmark.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(isActive ? Color.accentColor : .secondary)
 

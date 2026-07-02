@@ -5,7 +5,13 @@ import SwiftUI
 /// New tabs inherit the active tab's current directory (Terminal.app-style).
 final class WindowModel: ObservableObject {
     @Published var sessions: [SessionModel] = []
-    @Published var activeID: UUID? { didSet { AttentionManager.shared.markActive(active) } }
+    @Published var activeID: UUID? {
+        didSet {
+            AttentionManager.shared.markActive(active)
+            // Only the selected tab runs per-second bookkeeping (perf).
+            sessions.forEach { $0.isActiveTab = ($0.id == activeID) }
+        }
+    }
 
     init() {
         addTab()   // open one session on launch, in $HOME
@@ -41,6 +47,87 @@ final class WindowModel: ObservableObject {
     @discardableResult
     func open(directory: String, command: String? = nil) -> SessionModel {
         let s = SessionModel(initialDirectory: directory, initialCommand: command)
+        sessions.append(s)
+        activeID = s.id
+        return s
+    }
+
+    /// Open a Markdown file in a preview. `split: nil` follows the Settings →
+    /// Markdown "Open Markdown files in" choice.
+    ///
+    /// Single-split policy: the window has at most ONE split preview panel.
+    /// Every split-opened document becomes a tab INSIDE that panel
+    /// (terminal | preview | doc-tab1 | doc-tab2 …) instead of sprouting a
+    /// preview on every terminal tab. Falls back to a dedicated window tab
+    /// when there is no terminal to split beside.
+    func openPreview(url: URL, split: Bool? = nil) {
+        let wantSplit = split
+            ?? (UserDefaults.standard.string(forKey: "previewOpenMode") != "tab")
+        if wantSplit {
+            if let host = sessions.first(where: { $0.kind == .terminal && $0.preview != nil }),
+               let panel = host.preview {
+                panel.open(url: url)
+                host.code = nil        // a code split would occlude the preview
+                activeID = host.id
+                return
+            }
+            if let active, active.kind == .terminal {
+                let panel = PreviewPanelModel()
+                panel.open(url: url)
+                active.preview = panel
+                active.code = nil      // a code split would occlude the preview
+                return
+            }
+        }
+        let panel = PreviewPanelModel()
+        panel.open(url: url)
+        openPreviewTab(panel)
+    }
+
+    /// Open a code file in a read-only viewer. Single-split policy (like preview):
+    /// the window keeps at most ONE split code panel, and every opened file becomes
+    /// a tab INSIDE it (terminal | code | tab1 | tab2 …); re-opening a file focuses
+    /// its tab. Falls back to a dedicated `.code` tab when there is no terminal.
+    @MainActor
+    func openCode(url: URL, split: Bool = true) {
+        if split {
+            if let host = sessions.first(where: { $0.kind == .terminal && $0.code != nil }),
+               let panel = host.code {
+                panel.open(url: url)
+                activeID = host.id
+                return
+            }
+            if let active, active.kind == .terminal {
+                let panel = CodePanelModel()
+                panel.open(url: url)
+                active.code = panel
+                return
+            }
+        }
+        // No terminal to split beside: dedicated code tab (reuse an existing one).
+        if let host = sessions.first(where: { $0.kind == .code }), let panel = host.code {
+            panel.open(url: url)
+            activeID = host.id
+            return
+        }
+        let panel = CodePanelModel()
+        panel.open(url: url)
+        let s = SessionModel.codeTab(panel)
+        sessions.append(s)
+        activeID = s.id
+    }
+
+    /// Open several Markdown files at once (multi-file drag & drop): all land
+    /// in the single split panel as document tabs (or as window tabs when the
+    /// user's open-mode is "tab").
+    func openPreviews(urls: [URL]) {
+        urls.forEach { openPreview(url: $0) }
+    }
+
+    /// Open a preview panel as its own window tab (document name as the title).
+    @discardableResult
+    func openPreviewTab(_ panel: PreviewPanelModel) -> SessionModel {
+        let s = SessionModel.previewTab(panel)
         sessions.append(s)
         activeID = s.id
         return s
@@ -107,5 +194,14 @@ final class WindowRouter {
     weak var model: WindowModel?
     func openInNewTab(_ directory: String) {
         DispatchQueue.main.async { self.model?.open(directory: directory) }
+    }
+    func openMarkdownPreview(_ url: URL, split: Bool? = nil) {
+        DispatchQueue.main.async { self.model?.openPreview(url: url, split: split) }
+    }
+    func openMarkdownPreviews(_ urls: [URL]) {
+        DispatchQueue.main.async { self.model?.openPreviews(urls: urls) }
+    }
+    func openCode(_ url: URL, split: Bool = true) {
+        DispatchQueue.main.async { self.model?.openCode(url: url, split: split) }
     }
 }

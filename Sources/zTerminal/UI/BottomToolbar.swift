@@ -5,27 +5,110 @@ import AppKit
 /// a live duration timer. Reveal is enabled only for local, existing dirs.
 struct BottomToolbar: View {
     @ObservedObject var session: SessionModel
+    @EnvironmentObject var theme: ThemeManager
     @State private var branches: [String] = []
+
+    private func shows(_ item: ToolbarItemKind) -> Bool {
+        theme.tokens.showsToolbarItem(item)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: reveal) {
-                Label(session.displayCWD, systemImage: "folder")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12, design: .monospaced))
-            }
-            .buttonStyle(.plain)
-            .disabled(!session.isRevealable)
-            .help(session.isRevealable ? "Reveal in Finder"
-                                       : "Not a local directory")
-
-            if let git = session.gitStatus {
-                Divider().frame(height: 16)
-                gitSegment(git)
+            // Left group: interleave dividers only *between* visible segments, so
+            // hiding any item never leaves a dangling or doubled divider.
+            let segments = leftSegments
+            ForEach(Array(segments.enumerated()), id: \.offset) { idx, seg in
+                if idx > 0 { Divider().frame(height: 16) }
+                seg
             }
 
-            if !session.envBadges.isEmpty {
-                Divider().frame(height: 16)
+            Spacer()
+
+            if shows(.sidebar) {
+                Button(action: { NotificationCenter.default.post(name: .toggleSidebar, object: nil) }) {
+                    Image(systemName: "sidebar.left").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Toggle the file explorer (⌘⌥B)")
+                .accessibilityLabel("Toggle file explorer")
+            }
+
+            if shows(.search), session.kind == .terminal {
+                Button(action: { session.search.open() }) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Search the terminal (⌘F)")
+                .accessibilityLabel("Search terminal")
+            }
+
+            if shows(.editor), session.isRevealable {
+                Button(action: {
+                    let ed = EditorLauncher.Editor(rawValue: theme.tokens.editor) ?? .system
+                    EditorLauncher.openDirectory(session.cwd, editor: ed, customTemplate: theme.tokens.editorCommand)
+                }) {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open the current folder in your editor")
+                .accessibilityLabel("Open in editor")
+            }
+
+            if shows(.clear) {
+                Button(action: { session.clear() }) {
+                    Image(systemName: "trash").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Clear the terminal (⌘K)")
+                .accessibilityLabel("Clear terminal")
+            }
+
+            if shows(.restart), !session.isRunning {
+                Button("Restart") { WindowRouter.shared.model?.restart(session.id) }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+
+            if shows(.shellStatus) {
+                Text(session.isRunning ? "zsh · live" : "[process completed]")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(session.isRunning ? Color.green : Color.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(height: 34)
+        .contextMenu { configMenu }
+    }
+
+    /// The visible left-aligned segments, in on-screen order. Each is type-erased
+    /// so the divider interleaving above can treat them uniformly.
+    private var leftSegments: [AnyView] {
+        var out: [AnyView] = []
+
+        if shows(.directory) {
+            out.append(AnyView(
+                Button(action: reveal) {
+                    Label(session.displayCWD, systemImage: "folder")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                .buttonStyle(.plain)
+                .disabled(!session.isRevealable)
+                .help(session.isRevealable ? "Reveal in Finder" : "Not a local directory")
+            ))
+        }
+
+        if shows(.git), let git = session.gitStatus {
+            out.append(AnyView(gitSegment(git)))
+        }
+
+        if shows(.environment), !session.envBadges.isEmpty {
+            out.append(AnyView(
                 ForEach(session.envBadges) { badge in
                     Label(badge.text, systemImage: badge.symbol)
                         .labelStyle(.titleAndIcon)
@@ -33,55 +116,58 @@ struct BottomToolbar: View {
                         .foregroundStyle(.secondary)
                         .help("Active runtime")
                 }
-            }
+            ))
+        }
 
+        if shows(.commandStatus) {
             // Running program while busy; otherwise the last command's result.
             if let fg = session.foreground {
-                Divider().frame(height: 16)
-                Label(fg, systemImage: "play.fill")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.green)
-                    .help("Running: \(fg)")
+                out.append(AnyView(
+                    Label(fg, systemImage: "play.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.green)
+                        .help("Running: \(fg)")
+                ))
             } else if let result = session.lastCommand {
-                Divider().frame(height: 16)
-                commandResultSegment(result)
+                out.append(AnyView(commandResultSegment(result)))
             }
-
-            Divider().frame(height: 16)
-
-            Image(systemName: "clock")
-                .foregroundStyle(.secondary)
-            Text("Started \(startTimeString)")
-                .foregroundStyle(.secondary)
-                .font(.system(size: 12))
-
-            Text(durationString)
-                .font(.system(size: 12).monospacedDigit())
-
-            Spacer()
-
-            Button(action: { session.clear() }) {
-                Image(systemName: "trash").font(.system(size: 12))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Clear the terminal (⌘K)")
-            .accessibilityLabel("Clear terminal")
-
-            if !session.isRunning {
-                Button("Restart") { WindowRouter.shared.model?.restart(session.id) }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-
-            Text(session.isRunning ? "zsh · live" : "[process completed]")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(session.isRunning ? Color.green : Color.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .frame(height: 34)
+
+        if shows(.startTime) {
+            out.append(AnyView(
+                HStack(spacing: 6) {
+                    Image(systemName: "clock").foregroundStyle(.secondary)
+                    Text("Started \(startTimeString)")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                }
+            ))
+        }
+
+        if shows(.duration) {
+            out.append(AnyView(
+                Text(durationString).font(.system(size: 12).monospacedDigit())
+            ))
+        }
+
+        return out
+    }
+
+    /// Right-click menu on the toolbar: toggle each item's visibility in place.
+    /// Mirrors the Settings toggles ("toolbar view").
+    @ViewBuilder private var configMenu: some View {
+        Text("Toolbar Items")
+        ForEach(ToolbarItemKind.allCases) { item in
+            Button {
+                theme.tokens.setToolbarItem(item, visible: !shows(item))
+            } label: {
+                if shows(item) { Label(item.label, systemImage: "checkmark") }
+                else { Text(item.label) }
+            }
+        }
+        Divider()
+        Button("Hide Toolbar") { theme.tokens.showBottomToolbar = false }
     }
 
     /// Git segment: branch/SHA, dirty dot, ahead/behind, with a quick-actions menu.

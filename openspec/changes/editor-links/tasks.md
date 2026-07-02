@@ -1,22 +1,22 @@
 ## 1. Editor launcher
 
-- [ ] 1.1 `EditorLauncher`: resolve a token against a CWD, accept only existing files
-- [ ] 1.2 Parse a trailing `:line[:col]` suffix (pure + unit-tested)
-- [ ] 1.3 Per-editor launch templates (VS Code, Cursor, Xcode) + custom `{file}/{line}/{col}` template; `open -a` fallback
+- [x] 1.1 `EditorLauncher.resolve(token:cwd:)` — absolute/relative-to-CWD, accepts only existing files (`Sources/zTerminal/Support/EditorLauncher.swift`)
+- [x] 1.2 `parseSuffix` for trailing `:line[:col]` (pure, unit-tested)
+- [x] 1.3 Per-editor invocations (VS Code/Cursor `-g`, Xcode `xed --line`) + custom `{file}/{line}/{col}` template; `open`/`open -a` fallback when the CLI is missing
 
 ## 2. Terminal click routing
 
-- [ ] 2.1 On ⌘-click, get the token under the pointer (OSC 8 hyperlink when present, else path heuristic)
-- [ ] 2.2 Route file tokens to `EditorLauncher`; open at the parsed line/col
+- [x] 2.1 On ⌘-click, `ZTerminalView.tokenAt(point:)` maps the point to a cell (via `cellSize`) and extracts the whitespace-delimited token; consumes the event
+- [x] 2.2 `TerminalHostView` routes the token → `EditorLauncher.resolve` → `open` at the parsed line/col using the configured editor. *(OSC 8 hyperlink payloads: heuristic covers build output; explicit-link fast path is a follow-up.)*
 
 ## 3. UI
 
-- [ ] 3.1 Add an "Open in editor" button to `BottomToolbar` (opens the CWD)
-- [ ] 3.2 Add an `editor` setting to `DesignTokens` (tolerant-decoded) + a Settings control
+- [x] 3.1 `ToolbarItemKind.editor` "Open in editor" button in `BottomToolbar` (opens the CWD via `EditorLauncher.openDirectory`)
+- [x] 3.2 `DesignTokens.editor` + `editorCommand` (tolerant-decoded) + a Settings → Terminal → Editor picker (+ custom-command field)
 
 ## 4. Verification
 
-- [ ] 4.1 `swift build`
-- [ ] 4.2 Unit-test suffix parsing and CWD-relative resolution (existing vs missing files)
-- [ ] 4.3 Manual: cmd-click `path:line` from build output opens the editor at that line; the status-bar button opens the CWD
-- [ ] 4.4 Run `openspec validate editor-links --strict`
+- [x] 4.1 `swift build` — green
+- [x] 4.2 `EditorLauncherTests` (10) — suffix parsing, CWD-relative resolution (existing vs missing), CLI invocations, custom-template substitution
+- [ ] 4.3 **Manual/GUI QA** — needs the app run (blocked here by the multi-display/Spaces screenshot issue): ⌘-click `path:line` from build output opens the editor at that line; toolbar button opens the CWD; custom command works; missing-CLI falls back
+- [x] 4.4 `openspec validate editor-links --strict`

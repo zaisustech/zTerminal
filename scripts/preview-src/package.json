@@ -1,0 +1,21 @@
+{
+  "name": "zterminal-preview-renderer",
+  "private": true,
+  "description": "Source for the bundled Markdown preview renderer (built into Resources/Preview by ../build-preview-assets.sh)",
+  "type": "module",
+  "dependencies": {
+    "@vscode/markdown-it-katex": "1.1.2",
+    "dompurify": "3.4.11",
+    "highlight.js": "11.11.1",
+    "katex": "0.17.0",
+    "markdown-it": "14.3.0",
+    "markdown-it-anchor": "9.2.0",
+    "markdown-it-emoji": "3.0.0",
+    "markdown-it-footnote": "4.0.0",
+    "markdown-it-task-lists": "2.1.1",
+    "mermaid": "11.16.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}
